@@ -1,0 +1,28 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "调音器与节拍器二合一应用"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "星辰调音节拍器"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "星辰调音节拍器"
+    },
+    {
+      "name": "mic_reason",
+      "value": "用于实时检测乐器音高，进行调音"
+    },
+    {
+      "name": "vibrate_reason",
+      "value": "用于节拍器每拍振动反馈"
+    },
+    {
+      "name": "background_reason",
+      "value": "用于节拍器在锁屏/后台时继续播放"
+    }
+  ]
+}

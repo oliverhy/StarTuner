@@ -1,0 +1,28 @@
+/node_modules
+/oh_modules
+/local.properties
+/.idea
+**/build
+/.hvigor
+.cxx
+/.clangd
+/.clang-format
+/.clang-tidy
+**/.test
+/.appanalyzer
+
+# Local build outputs and release packages
+/release
+/tmp
+*.app
+*.hap
+
+# Signing credentials and certificates
+*.p12
+*.p7b
+*.cer
+*.csr
+**/SIGNING-CREDENTIALS.txt
+
+# DevEco Studio local signing configuration
+/build-profile.json5
