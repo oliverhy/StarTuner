@@ -10,6 +10,7 @@ import {
   RhythmPattern, ClickTimbre
 } from '../viewmodel/MetronomeViewModel';
 import { METRONOME_BPM_MIN, METRONOME_BPM_MAX } from '../common/Constants';
+import { MetronomeSettings, MetronomeSettingsStore } from '../common/MetronomeSettingsStore';
 
 @Entry
 @Component
@@ -28,14 +29,17 @@ struct MetronomePage {
   @State beatLevels: number[] = [3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
   @State stopAfterMinutes: number = 0;
   @State metronomeAngle: number = 0;
+  @State settingsReady: boolean = false;
 
   private vm: MetronomeViewModel = getMetronomeViewModel();
+  private settingsStore: MetronomeSettingsStore = new MetronomeSettingsStore();
   private swingDirection: number = 1;
   private stopTimer: number = -1;
   private timerOptions: number[] = [0, 5, 10, 20, 30];
   private context = getContext(this) as common.UIAbilityContext;
 
   aboutToAppear(): void {
+    this.settingsReady = false;
     this.bpm = this.vm.getBpm();
     this.timeSignatureIdx = this.vm.getTimeSignatureIdx();
     this.rhythmIdx = this.vm.getRhythmIdx();
@@ -48,14 +52,69 @@ struct MetronomePage {
       this.swingDirection = -this.swingDirection;
       this.metronomeAngle = this.swingDirection * 18;
     });
+    void this.restoreSettings();
   }
 
   aboutToDisappear(): void {
+    this.persistSettings();
     this.vm.stop(this.context);
     this.clearStopTimer();
   }
 
+  private async restoreSettings(): Promise<void> {
+    const settings: MetronomeSettings = await this.settingsStore.load(this.context);
+    this.bpm = settings.bpm;
+    this.timeSignatureIdx = settings.timeSignatureIdx;
+    this.rhythmIdx = settings.rhythmIdx;
+    this.accentEnabled = settings.accentEnabled;
+    this.vibrateEnabled = settings.vibrateEnabled;
+    this.volume = settings.volume;
+    this.clickFreq = settings.clickFreq;
+    this.timbreIdx = settings.timbreIdx;
+    this.beatLevels = settings.beatLevels;
+    this.stopAfterMinutes = this.timerOptions.indexOf(settings.stopAfterMinutes) >= 0 ?
+      settings.stopAfterMinutes : 0;
+    this.syncParamsToViewModel();
+    this.settingsReady = true;
+  }
+
+  private syncParamsToViewModel(): void {
+    this.vm.setBpm(this.bpm);
+    this.vm.setTimeSignatureIdx(this.timeSignatureIdx);
+    this.vm.setRhythmIdx(this.rhythmIdx);
+    this.vm.setAccentEnabled(this.accentEnabled);
+    this.vm.setVibrateEnabled(this.vibrateEnabled);
+    this.vm.setVolume(this.volume);
+    this.vm.setClickFreq(this.clickFreq);
+    this.vm.setClickTimbre(this.timbreIdx);
+    for (let i = 0; i < this.beatLevels.length; i++) {
+      this.vm.setBeatLevel(i, this.beatLevels[i]);
+    }
+  }
+
+  private persistSettings(): void {
+    if (!this.settingsReady) {
+      return;
+    }
+    const settings: MetronomeSettings = {
+      bpm: this.bpm,
+      timeSignatureIdx: this.timeSignatureIdx,
+      rhythmIdx: this.rhythmIdx,
+      accentEnabled: this.accentEnabled,
+      vibrateEnabled: this.vibrateEnabled,
+      volume: this.volume,
+      clickFreq: this.clickFreq,
+      timbreIdx: this.timbreIdx,
+      beatLevels: this.beatLevels.slice(),
+      stopAfterMinutes: this.stopAfterMinutes
+    };
+    this.settingsStore.save(settings);
+  }
+
   private toggleRun(): void {
+    if (!this.settingsReady) {
+      return;
+    }
     if (this.isRunning) {
       this.vm.stop(this.context);
       this.isRunning = false;
@@ -63,13 +122,8 @@ struct MetronomePage {
       this.swingDirection = 1;
       this.clearStopTimer();
     } else {
-      this.vm.setBpm(this.bpm);
-      this.vm.setTimeSignatureIdx(this.timeSignatureIdx);
-      this.vm.setRhythmIdx(this.rhythmIdx);
-      this.vm.setAccentEnabled(this.accentEnabled);
-      this.vm.setVibrateEnabled(this.vibrateEnabled);
-      this.vm.setVolume(this.volume);
-      this.vm.setClickFreq(this.clickFreq);
+      this.syncParamsToViewModel();
+      this.persistSettings();
       this.isRunning = this.vm.start(this.context);
       if (this.isRunning) {
         this.scheduleStopTimer();
@@ -78,8 +132,12 @@ struct MetronomePage {
   }
 
   private changeBpm(delta: number): void {
+    if (!this.settingsReady) {
+      return;
+    }
     this.bpm = Math.max(METRONOME_BPM_MIN, Math.min(METRONOME_BPM_MAX, this.bpm + delta));
     this.vm.setBpm(this.bpm);
+    this.persistSettings();
   }
 
   private swingDuration(): number {
@@ -87,6 +145,9 @@ struct MetronomePage {
   }
 
   private handleTap(): void {
+    if (!this.settingsReady) {
+      return;
+    }
     const now = Date.now();
     this.tapTimes.push(now);
     while (this.tapTimes.length > 0 && now - this.tapTimes[0] > 2000) {
@@ -102,15 +163,20 @@ struct MetronomePage {
       if (bpmVal >= METRONOME_BPM_MIN && bpmVal <= METRONOME_BPM_MAX) {
         this.bpm = bpmVal;
         this.vm.setBpm(bpmVal);
+        this.persistSettings();
       }
     }
   }
 
   private onTimbreChange(idx: number): void {
+    if (!this.settingsReady) {
+      return;
+    }
     this.timbreIdx = idx;
     this.clickFreq = CLICK_TIMBRES[idx].freq;
     this.vm.setClickTimbre(idx);
     this.vm.setClickFreq(this.clickFreq);
+    this.persistSettings();
   }
 
   private beatIndices(): number[] {
@@ -123,14 +189,26 @@ struct MetronomePage {
   }
 
   private cycleBeatLevel(beatIndex: number): void {
+    if (!this.settingsReady) {
+      return;
+    }
     const nextLevels = this.beatLevels.slice();
     nextLevels[beatIndex] = (nextLevels[beatIndex] + 1) % 4;
     this.beatLevels = nextLevels;
     this.vm.setBeatLevel(beatIndex, nextLevels[beatIndex]);
+    this.persistSettings();
   }
 
   private beatLevelName(level: number): string {
     return ['静', '弱', '中', '强'][level];
+  }
+
+  private beatLevelHeight(level: number): number {
+    // 强拍填满柱体，弱拍和中拍按等级递增，静音不显示填充。
+    if (level <= 0) {
+      return 0;
+    }
+    return Math.min(42, level * 14);
   }
 
   private beatLevelColor(level: number, active: boolean): string {
@@ -177,8 +255,12 @@ struct MetronomePage {
   }
 
   private selectStopTimer(minutes: number): void {
+    if (!this.settingsReady) {
+      return;
+    }
     this.stopAfterMinutes = minutes;
     this.scheduleStopTimer();
+    this.persistSettings();
   }
 
   @Builder
@@ -307,7 +389,7 @@ struct MetronomePage {
                         .strokeWidth(1)
                       Rect()
                         .width(20)
-                        .height(5 + this.beatLevels[i] * 10)
+                        .height(this.beatLevelHeight(this.beatLevels[i]))
                         .radius(6)
                         .fill(this.beatLevelColor(this.beatLevels[i], i === this.currentBeat && this.isRunning))
                     }
@@ -338,8 +420,12 @@ struct MetronomePage {
                 .trackColor('#3D4A4260')
                 .blockColor('#FFF1D9')
                 .onChange((value: number) => {
+                  if (!this.settingsReady) {
+                    return;
+                  }
                   this.bpm = value;
                   this.vm.setBpm(value);
+                  this.persistSettings();
                 })
 
               Row({ space: 10 }) {
@@ -421,9 +507,13 @@ struct MetronomePage {
                       .borderRadius(14)
                       .backgroundColor(this.timeSignatureIdx === idx ? '#FFB35C' : '#24172034')
                       .onClick(() => {
+                        if (!this.settingsReady) {
+                          return;
+                        }
                         this.timeSignatureIdx = idx;
                         this.currentBeat = 0;
                         this.vm.setTimeSignatureIdx(idx);
+                        this.persistSettings();
                       })
                   }, (ts: number[], idx: number) => `${ts[0]}-${ts[1]}-${idx}`)
                 }
@@ -447,8 +537,12 @@ struct MetronomePage {
                     .borderRadius(14)
                     .backgroundColor(this.rhythmIdx === idx ? '#FFB35C' : '#24172034')
                     .onClick(() => {
+                      if (!this.settingsReady) {
+                        return;
+                      }
                       this.rhythmIdx = idx;
                       this.vm.setRhythmIdx(idx);
+                      this.persistSettings();
                     })
                 }, (p: RhythmPattern) => p.name)
               }
@@ -503,8 +597,12 @@ struct MetronomePage {
                   .trackColor('#3D4A4260')
                   .blockColor('#FFF1D9')
                   .onChange((value: number) => {
+                    if (!this.settingsReady) {
+                      return;
+                    }
                     this.clickFreq = value;
                     this.vm.setClickFreq(value);
+                    this.persistSettings();
                   })
               }
               .width('100%')
@@ -520,8 +618,12 @@ struct MetronomePage {
                   .trackColor('#3D4A4260')
                   .blockColor('#FFF1D9')
                   .onChange((value: number) => {
+                    if (!this.settingsReady) {
+                      return;
+                    }
                     this.volume = value;
                     this.vm.setVolume(value);
+                    this.persistSettings();
                   })
                 Text(`${this.volume}%`)
                   .width(42)
@@ -592,8 +694,12 @@ struct MetronomePage {
                 Toggle({ type: ToggleType.Switch, isOn: this.accentEnabled })
                   .selectedColor('#FF9F5C')
                   .onChange((on: boolean) => {
+                    if (!this.settingsReady) {
+                      return;
+                    }
                     this.accentEnabled = on;
                     this.vm.setAccentEnabled(on);
+                    this.persistSettings();
                   })
               }
               .layoutWeight(1)
@@ -618,8 +724,12 @@ struct MetronomePage {
                 Toggle({ type: ToggleType.Switch, isOn: this.vibrateEnabled })
                   .selectedColor('#FF9F5C')
                   .onChange((on: boolean) => {
+                    if (!this.settingsReady) {
+                      return;
+                    }
                     this.vibrateEnabled = on;
                     this.vm.setVibrateEnabled(on);
+                    this.persistSettings();
                   })
               }
               .layoutWeight(1)
@@ -638,7 +748,7 @@ struct MetronomePage {
         .align(Alignment.Top)
 
         Row() {
-          Text(this.isRunning ? '停止节拍' : '开始节拍')
+          Text(this.settingsReady ? (this.isRunning ? '停止节拍' : '开始节拍') : '加载设置…')
             .fontSize(17)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.isRunning ? '#FFE9ED' : '#251005')
@@ -651,6 +761,7 @@ struct MetronomePage {
           .backgroundColor(this.isRunning ? '#D9506880' : '#FFB35C')
           .border({ width: 1, color: this.isRunning ? '#FFFF8495' : '#D4FFE0A6' })
           .shadow({ radius: 18, color: this.isRunning ? '#50FF5B70' : '#55FF9148', offsetY: 8 })
+          .opacity(this.settingsReady ? 1 : 0.55)
           .margin({ top: 8, bottom: 18 })
           .onClick(() => this.toggleRun())
       }
