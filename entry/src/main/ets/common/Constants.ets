@@ -4,7 +4,7 @@
 
 // 应用相关
 export const APP_NAME: string = '星辰调音节拍器';
-export const APP_VERSION: string = '1.0.0';
+export const APP_VERSION: string = '1.0.1';
 export const BUNDLE_NAME: string = 'com.yinhe.startuner';
 
 // 页面路由路径

@@ -9,6 +9,7 @@ import { INSTRUMENTS, InstrumentCategory, InstrumentSpec } from '../model/Instru
 import { displayFromFreq, freqFromMidi } from '../common/MusicTheory';
 import { requestMicrophonePermission, checkMicrophonePermission } from '../common/Permissions';
 import { TUNER_A4_MIN, TUNER_A4_MAX, TUNER_FREQ_MIN, TUNER_FREQ_MAX } from '../common/Constants';
+import { DEFAULT_TUNER_SETTINGS, TunerSettings, TunerSettingsStore } from '../common/TunerSettingsStore';
 
 interface ModeOption {
   key: TunerTargetMode;
@@ -60,13 +61,18 @@ struct TunerPage {
   @State instName: string = '吉他';
   @State selectedNoteIdx: number = 9;
   @State selectedInstrumentCategory: string = 'common';
+  @State settingsReady: boolean = false;
 
   private vm: TunerViewModel = getTunerViewModel();
+  private settingsStore: TunerSettingsStore = new TunerSettingsStore();
   private context = getContext(this) as common.UIAbilityContext;
 
   aboutToAppear(): void {
+    this.settingsReady = false;
     this.vm.setA4Ref(this.a4Ref);
     this.vm.setInstrumentId(this.selectedInstrumentId);
+    this.vm.setTargetMode(this.targetMode as TunerTargetMode);
+    this.vm.setTargetMidi(this.midiFromNoteIdx(this.selectedNoteIdx));
     this.vm.setTargetFreqHz(this.targetFreqHz);
     this.micReady = checkMicrophonePermission();
     this.vm.setPitchListener((freq: number, note: string, cents: number, target: string) => {
@@ -78,13 +84,84 @@ struct TunerPage {
     this.vm.setStatusListener((listening: boolean) => {
       this.isListening = listening;
     });
+    void this.restoreSettings();
   }
 
   aboutToDisappear(): void {
     this.vm.stop();
+    this.persistSettings();
+  }
+
+  private async restoreSettings(): Promise<void> {
+    const settings: TunerSettings = await this.settingsStore.load(this.context);
+    let restoredMode: string = settings.targetMode;
+    if (!this.isValidTargetMode(restoredMode)) {
+      restoredMode = DEFAULT_TUNER_SETTINGS.targetMode;
+    }
+
+    let restoredInstrumentId: string = settings.instrumentId;
+    const restoredInstrument = INSTRUMENTS.find((inst: InstrumentSpec) => inst.id === restoredInstrumentId);
+    if (!restoredInstrument) {
+      restoredInstrumentId = DEFAULT_TUNER_SETTINGS.instrumentId;
+    }
+
+    let restoredCategory: string = settings.selectedInstrumentCategory;
+    if (!this.isValidInstrumentCategory(restoredCategory)) {
+      restoredCategory = DEFAULT_TUNER_SETTINGS.selectedInstrumentCategory;
+    }
+
+    this.targetMode = restoredMode;
+    this.selectedInstrumentId = restoredInstrumentId;
+    this.selectedInstrumentCategory = restoredCategory;
+    this.selectedNoteIdx = Math.max(0, Math.min(11, Math.round(settings.selectedNoteIdx)));
+    this.targetFreqHz = settings.targetFreqHz;
+    this.a4Ref = settings.a4Ref;
+
+    const activeInstrument = INSTRUMENTS.find((inst: InstrumentSpec) => inst.id === this.selectedInstrumentId);
+    this.instName = activeInstrument ? activeInstrument.name : '吉他';
+
+    this.vm.setTargetMode(this.targetMode as TunerTargetMode);
+    this.vm.setInstrumentId(this.selectedInstrumentId);
+    this.vm.setTargetMidi(this.midiFromNoteIdx(this.selectedNoteIdx));
+    this.vm.setTargetFreqHz(this.targetFreqHz);
+    this.vm.setA4Ref(this.a4Ref);
+    this.settingsReady = true;
+  }
+
+  private isValidTargetMode(mode: string): boolean {
+    return mode === TunerTargetMode.INSTRUMENT ||
+      mode === TunerTargetMode.NOTE ||
+      mode === TunerTargetMode.HZ;
+  }
+
+  private isValidInstrumentCategory(category: string): boolean {
+    for (let i = 0; i < INSTRUMENT_CATEGORY_OPTIONS.length; i++) {
+      if (INSTRUMENT_CATEGORY_OPTIONS[i].key === category) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private persistSettings(): void {
+    if (!this.settingsReady) {
+      return;
+    }
+    const settings: TunerSettings = {
+      targetMode: this.targetMode,
+      instrumentId: this.selectedInstrumentId,
+      selectedInstrumentCategory: this.selectedInstrumentCategory,
+      selectedNoteIdx: this.selectedNoteIdx,
+      targetFreqHz: this.targetFreqHz,
+      a4Ref: this.a4Ref
+    };
+    this.settingsStore.save(settings);
   }
 
   private toggleCapture(): void {
+    if (!this.settingsReady) {
+      return;
+    }
     if (!this.isListening) {
       if (!this.micReady) {
         requestMicrophonePermission(this.context).then((granted: boolean) => {
@@ -104,14 +181,21 @@ struct TunerPage {
   private syncParamsAndStart(): void {
     this.vm.setA4Ref(this.a4Ref);
     this.vm.setInstrumentId(this.selectedInstrumentId);
+    this.vm.setTargetMode(this.targetMode as TunerTargetMode);
+    this.vm.setTargetMidi(this.midiFromNoteIdx(this.selectedNoteIdx));
     this.vm.setTargetFreqHz(this.targetFreqHz);
+    this.persistSettings();
     this.vm.start();
   }
 
   private onInstrumentChange(inst: InstrumentSpec): void {
+    if (!this.settingsReady) {
+      return;
+    }
     this.selectedInstrumentId = inst.id;
     this.instName = inst.name;
     this.vm.setInstrumentId(inst.id);
+    this.persistSettings();
   }
 
   private getFilteredInstruments(): InstrumentSpec[] {
@@ -124,13 +208,21 @@ struct TunerPage {
   }
 
   private onA4Change(v: number): void {
+    if (!this.settingsReady) {
+      return;
+    }
     this.a4Ref = v;
     this.vm.setA4Ref(v);
+    this.persistSettings();
   }
 
   private onFreqHzChange(v: number): void {
+    if (!this.settingsReady) {
+      return;
+    }
     this.targetFreqHz = v;
     this.vm.setTargetFreqHz(v);
+    this.persistSettings();
   }
 
   private midiFromNoteIdx(idx: number): number {
@@ -388,8 +480,12 @@ struct TunerPage {
                   .borderRadius(17)
                   .backgroundColor(this.targetMode === m.key ? '#72E8FF' : '#00101729')
                   .onClick(() => {
+                    if (!this.settingsReady) {
+                      return;
+                    }
                     this.targetMode = m.key;
                     this.vm.setTargetMode(m.key);
+                    this.persistSettings();
                   })
               }, (m: ModeOption) => m.key)
             }
@@ -434,7 +530,11 @@ struct TunerPage {
                         color: this.selectedInstrumentCategory === category.key ? '#A9F4FF' : '#315E7694'
                       })
                       .onClick(() => {
+                        if (!this.settingsReady) {
+                          return;
+                        }
                         this.selectedInstrumentCategory = category.key;
+                        this.persistSettings();
                       })
                     }, (category: InstrumentCategoryOption) => category.key)
                   }
@@ -510,8 +610,12 @@ struct TunerPage {
                       .backgroundColor(this.selectedNoteIdx === i ? '#72E8FF' : '#251B2B44')
                       .margin(4)
                       .onClick(() => {
+                        if (!this.settingsReady) {
+                          return;
+                        }
                         this.selectedNoteIdx = i;
                         this.vm.setTargetMidi(this.midiFromNoteIdx(i));
+                        this.persistSettings();
                       })
                   }, (n: string) => n)
                 }
@@ -623,7 +727,7 @@ struct TunerPage {
         .align(Alignment.Top)
 
         Row() {
-          Text(this.isListening ? '停止检测' : '开始检测')
+          Text(this.settingsReady ? (this.isListening ? '停止检测' : '开始检测') : '加载设置…')
             .fontSize(17)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.isListening ? '#FFE7EA' : '#06131D')
@@ -636,6 +740,7 @@ struct TunerPage {
           .backgroundColor(this.isListening ? '#D9506880' : '#6DE8FF')
           .border({ width: 1, color: this.isListening ? '#FFFF8495' : '#CCB6F6FF' })
           .shadow({ radius: 18, color: this.isListening ? '#50FF5B70' : '#5557DFF6', offsetY: 8 })
+          .opacity(this.settingsReady ? 1 : 0.55)
           .margin({ top: 8, bottom: 18 })
           .onClick(() => this.toggleCapture())
       }
